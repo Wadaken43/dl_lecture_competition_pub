@@ -3,17 +3,21 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torchmetrics import Accuracy
-import hydra
+from torchvision import transforms
+from torchaudio.transforms import Spectrogram
+import hydra #
 from omegaconf import DictConfig
 import wandb
 from termcolor import cprint
 from tqdm import tqdm
 
 from src.datasets import ThingsMEGDataset
-from src.models import BasicConvClassifier
+#from src.models import BasicConvClassifier
+from src.models_resnet50 import ResNet, Block
 from src.utils import set_seed
 
 
+# hydraメイン関数の定義
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def run(args: DictConfig):
     set_seed(args.seed)
@@ -24,25 +28,43 @@ def run(args: DictConfig):
 
     # ------------------
     #    Dataloader
-    # ------------------
+    # ------------------ 
+    transform = transforms.Compose([
+        Spectrogram(n_fft=30, hop_length=5)
+    ])
     loader_args = {"batch_size": args.batch_size, "num_workers": args.num_workers}
-    
+
     train_set = ThingsMEGDataset("train", args.data_dir)
-    train_loader = torch.utils.data.DataLoader(train_set, shuffle=True, **loader_args)
+    train_set.transform = transform
+    train_loader = torch.utils.data.DataLoader(train_set, 
+                                               shuffle=True, 
+                                               **loader_args
+                                               )
     val_set = ThingsMEGDataset("val", args.data_dir)
-    val_loader = torch.utils.data.DataLoader(val_set, shuffle=False, **loader_args)
-    test_set = ThingsMEGDataset("test", args.data_dir)
+    val_set.transform = transform
+    val_loader = torch.utils.data.DataLoader(val_set, 
+                                             shuffle=False, 
+                                             **loader_args
+                                             )
+    test_set = ThingsMEGDataset("test", 
+                                args.data_dir)
+    test_set.transform = transform
     test_loader = torch.utils.data.DataLoader(
-        test_set, shuffle=False, batch_size=args.batch_size, num_workers=args.num_workers
+        test_set, 
+        shuffle=False, 
+        batch_size=args.batch_size, 
+        num_workers=args.num_workers
     )
 
     # ------------------
     #       Model
     # ------------------
+    """
     model = BasicConvClassifier(
         train_set.num_classes, train_set.seq_len, train_set.num_channels
     ).to(args.device)
-
+    """
+    model = ResNet(block=Block, num_classes=train_set.num_classes).to(args.device)
     # ------------------
     #     Optimizer
     # ------------------
@@ -107,11 +129,10 @@ def run(args: DictConfig):
     model.eval()
     for X, subject_idxs in tqdm(test_loader, desc="Validation"):        
         preds.append(model(X.to(args.device)).detach().cpu())
-        
+    
     preds = torch.cat(preds, dim=0).numpy()
     np.save(os.path.join(logdir, "submission"), preds)
     cprint(f"Submission {preds.shape} saved at {logdir}", "cyan")
-
 
 if __name__ == "__main__":
     run()
